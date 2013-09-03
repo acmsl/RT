@@ -174,6 +174,7 @@ function git_init() {
         exitWithErrorCode CANNOT_SETUP_GIT_REPOSITORY;
       fi
     else
+      rm -rf "${GIT_DIR}" 2>&1 > /dev/null
       logInfoResult FAILURE "failed";
       exitWithErrorCode CANNOT_SETUP_GIT_REPOSITORY;
     fi
@@ -205,13 +206,19 @@ function git_commit() {
 
   logInfo -n "Commiting changes";
 
-  git --git-dir "${GIT_DIR}" --work-tree . commit -a -m"$(date '+%Y%m%d%H%M')" 2>&1 > /dev/null
+  git --git-dir "${GIT_DIR}" --work-tree . status | tail -n 1 | grep "nothing" | grep "commit" 2>&1 > /dev/null
   rescode=$?;
   if [ $rescode -eq 0 ]; then
     logInfoResult SUCCESS "done";
   else
-    logInfoResult FAILURE "failed";
-    exitWithErrorCode CANNOT_COMMIT_CHANGES;
+    git --git-dir "${GIT_DIR}" --work-tree . commit -a -m"$(date '+%Y%m%d%H%M')" 2>&1 > /dev/null
+    rescode=$?;
+    if [ $rescode -eq 0 ]; then
+      logInfoResult SUCCESS "done";
+    else
+      logInfoResult FAILURE "failed";
+      exitWithErrorCode CANNOT_COMMIT_CHANGES;
+    fi
   fi  
 }
 
@@ -226,6 +233,6 @@ function git_push() {
     logInfoResult SUCCESS "done";
   else
     logInfoResult FAILURE "failed";
-    exitWithErrorCode CANNOT_COMMIT_CHANGES;
+    exitWithErrorCode CANNOT_PUSH_CHANGES;
   fi  
 }
