@@ -44,6 +44,13 @@ function defineEnv() {
     export GIT_DIR="${GIT_DIR_DEFAULT}";
   fi
 
+  export EXTENSIONS_DEFAULT="java stg properties xml jsp xsl xslt txt dsg";
+  export EXTENSIONS_DESCRIPTION="The filename extensions to deal with";
+  if   [ "${EXTENSIONS+1}" != "1" ] \
+     || [ "x${EXTENSIONS}" == "x" ]; then
+    export EXTENSIONS="${EXTENSIONS_DEFAULT}";
+  fi
+  
   ENV_VARIABLES=(\
     GIT_BASEDIR \
     GIT_DIR \
@@ -56,23 +63,29 @@ function defineEnv() {
 function defineErrors() {
   export INVALID_OPTION="Unrecognized option";
   export GIT_NOT_INSTALLED="git not installed";
+  export WATCH_NOT_INSTALLED="watch not installed";
+  export REALPATH_NOT_INSTALLED="realpath not installed";
   export COMMAND_IS_MANDATORY="command is mandatory";
   export INVALID_COMMAND="Invalid command";
   export REMOTE_REPOSITORY_IS_MANDATORY="remote repository url is mandatory";
   export CANNOT_SETUP_GIT_REPOSITORY="Cannot setup internal git repository";
   export CANNOT_ADD_FILES="Cannot add existing files to RT repository";
   export CANNOT_COMMIT_CHANGES="Cannot commit changes";
+  export CANNOT_WATCH_CHANGES_IN_BACKGROUND="Cannot watch changes in background";
   export CANNOT_PUSH_CHANGES="Cannot push changes";
 
   ERROR_MESSAGES=(\
     INVALID_OPTION \
     GIT_NOT_INSTALLED \
+    WATCH_NOT_INSTALLED \
+    REALPATH_NOT_INSTALLED \
     COMMAND_IS_MANDATORY \
     INVALID_COMMAND \
     REMOTE_REPOSITORY_IS_MANDATORY \
     CANNOT_SETUP_GIT_REPOSITORY \
     CANNOT_ADD_FILES \
     CANNOT_COMMIT_CHANGES \
+    CANNOT_WATCH_CHANGES_IN_BACKGROUND \
     CANNOT_PUSH_CHANGES \
   );
 
@@ -131,6 +144,9 @@ function main() {
       git_init "${REMOTE_REPOS}";
       ;;
     "commit")
+      git_commit_loop;
+      ;;
+    "_ci")
       git_commit;
       ;;
     "push")
@@ -191,18 +207,23 @@ function git_add_files() {
 
   logInfo -n "Adding files";
 
-  find . -type f -exec file {} \; 2>&1 | grep -v target | grep text | grep -v -e '~$' | cut -d':' -f 1 | awk -vG="${GIT_DIR}" '{printf("git --git-dir %s --work-tree . add --ignore-errors %s 2>&1 > /dev/null\n", G, $0);}' | sh 2>&1 > /dev/null
-  rescode=$?;
-  if [ $rescode -eq 0 ]; then
-    logInfoResult SUCCESS "done";
-  else
-    logInfoResult FAILURE "failed";
-    exitWithErrorCode CANNOT_ADD_FILES;
-  fi
+#  find . -type f -exec file {} \; 2>&1 | grep -v target | grep text | grep -v -e '~$' | cut -d':' -f 1 | awk -vG="${GIT_DIR}" '{printf("git --git-dir %s --work-tree . add --ignore-errors %s 2>&1 > /dev/null\n", G, $0);}' | sh 2>&1 > /dev/null
+  for ext in ${EXTENSIONS}; do
+    local _add="'*.${ext}'";
+    echo git --git-dir "${GIT_DIR}" --work-tree . add --ignore-errors ${_add} 2>&1 > /dev/null | sh
+    rescode=$?;
+    if [ $rescode -ne 0 ]; then
+      logInfoResult FAILURE "failed";
+      exitWithErrorCode CANNOT_ADD_FILES;
+    fi
+  done
+  logInfoResult SUCCESS "done";
 }
 
 function git_commit() {
   local rescode=0;
+
+  git_add_files;
 
   logInfo -n "Commiting changes";
 
@@ -220,6 +241,20 @@ function git_commit() {
       exitWithErrorCode CANNOT_COMMIT_CHANGES;
     fi
   fi  
+}
+
+function git_commit_loop() {
+  local _auxPath=$(realpath ${SCRIPT_NAME});
+  local _auxFolder=$(dirname ${_auxPath});
+
+  logInfo -n "Watching changes in background";
+  watch -n1 "bash -c \"export PATH=\$PATH:~/github/RT; cd ${_auxFolder}; ${SCRIPT_NAME} _ci\"" > /dev/null &
+  if [ $? -eq 0 ]; then
+    logInfoResult SUCCESS "done";
+  else
+    logInforResult FAILURE "failed";
+    exitWithErrorCode CANNOT_WATCH_CHANGES_IN_BACKGROUND;
+  fi
 }
 
 function git_push() {
