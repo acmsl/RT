@@ -76,7 +76,7 @@ function defineEnv() {
         export REMOTE_BRANCH="${REMOTE_BRANCH_DEFAULT}";
     fi
     
-    export GITIGNORE_ENTRIES_DEFAULT="*~ *~* .idea target *.class *.swp *.iml .* *. bak";
+    export GITIGNORE_ENTRIES_DEFAULT="*~ *~* .idea target *.class *.swp *.iml .* *.bak *.rej *.orig *_";
     export GITIGNORE_ENTRIES_DESCRIPTION="The files to ignore";
     if    [ "${GITIGNORE_ENTRIES+1}" != "1" ] \
        || [ "x${GITIGNORE_ENTRIES}" == "x" ]; then
@@ -520,16 +520,26 @@ function git_add_files() {
     pushd "${_prjFolder}" > /dev/null;
     logInfo -n "Adding files";
 
-    find . -type f -exec file {} \; 2>&1 | grep -v target | grep text | grep -v -e '~$' | cut -d':' -f 1 | awk -vG="${GIT_DIR}" '{printf("git --git-dir %s --work-tree . add --ignore-errors %s 2>&1 > /dev/null\n", G, $0);}' | sh 2>&1 > /dev/null
-    rescode=$?;
-    if [ $rescode -ne 0 ]; then
-        popd > /dev/null
-        purge_stale_lock
-        logInfoResult FAILURE "failed";
-        exitWithErrorCode CANNOT_ADD_FILES;
-    fi
-    logInfoResult SUCCESS "done";
+    echo git --git-dir "${GIT_DIR}" --work-tree . add --ignore-errors . 2>&1 > /dev/null | sh
+
     popd > /dev/null
+    purge_stale_lock
+    logInfoResult SUCCESS "done";
+}
+
+function git_add_files_with_find() {
+    local _prjFolder="${1}";
+    local rescode=0;
+
+    pushd "${_prjFolder}" > /dev/null;
+    logInfo -n "Adding files";
+
+    find . -type f -exec file {} \; 2>&1 | grep -v target | grep text | grep -v -e '~$' | cut -d':' -f 1 | awk -vG="${GIT_DIR}" '{printf("git --git-dir %s --work-tree . add --ignore-errors %s 2>&1 > /dev/null\n", G, $0);}' > /tmp/"$(basename ${_prjFolder})".log
+    find . -type f -exec file {} \; 2>&1 | grep -v target | grep text | grep -v -e '~$' | cut -d':' -f 1 | awk -vG="${GIT_DIR}" '{printf("git --git-dir %s --work-tree . add --ignore-errors %s 2>&1 > /dev/null\n", G, $0);}' | sh 2>&1 > /dev/null
+
+    popd > /dev/null
+    purge_stale_lock
+    logInfoResult SUCCESS "done";
 }
 
 function git_add_files_based_on_extensions() {
