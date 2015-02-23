@@ -62,11 +62,35 @@ function defineEnv() {
         export COMMIT_FREQUENCY="${COMMIT_FREQUENCY_DEFAULT}";
     fi
     
+    export REMOTE_REPO_NAME_DEFAULT="origin";
+    export REMOTE_REPO_NAME_DESCRIPTION="The name of the remote (typically 'origin')";
+    if    [ "${REMOTE_REPO_NAME+1}" != "1" ] \
+       || [ "x${REMOTE_REPO_NAME}" == "x" ]; then
+        export REMOTE_REPO_NAME="${REMOTE_REPO_NAME_DEFAULT}";
+    fi
+    
+    export REMOTE_BRANCH_DEFAULT="master";
+    export REMOTE_BRANCH_DESCRIPTION="The name of the remote branch (typically 'master')";
+    if    [ "${REMOTE_BRANCH+1}" != "1" ] \
+       || [ "x${REMOTE_BRANCH}" == "x" ]; then
+        export REMOTE_BRANCH="${REMOTE_BRANCH_DEFAULT}";
+    fi
+    
+    export GITIGNORE_ENTRIES_DEFAULT="*~ *~* .idea target *.class *.swp *.iml .* *. bak";
+    export GITIGNORE_ENTRIES_DESCRIPTION="The files to ignore";
+    if    [ "${GITIGNORE_ENTRIES+1}" != "1" ] \
+       || [ "x${GITIGNORE_ENTRIES}" == "x" ]; then
+        export GITIGNORE_ENTRIES="${GITIGNORE_ENTRIES_DEFAULT}";
+    fi
+    
     ENV_VARIABLES=(\
         GIT_BASEDIR \
         GIT_DIR \
         EXTENSIONS \
         COMMIT_FREQUENCY \
+        REMOTE_REPO_NAME \
+        REMOTE_BRANCH \
+        GITIGNORE_ENTRIES \
     );
     
     export ENV_VARIABLES;
@@ -164,7 +188,7 @@ function main() {
     case "${COMMAND}" in
         "init")
             if acquire_lock "${_lockFile}"; then
-                git_init "${REMOTE_REPOS}";
+                git_initialize "${REMOTE_REPOS}" "${PWD}";
                 purge_stale_lock "${_lockFile}";
             else
                 exitWithErrorCode ANOTHER_RT_ALREADY_RUNNING;
@@ -178,7 +202,7 @@ function main() {
             fi       
             ;;
         "_ci")
-            git_commit;
+            git_commit "${PWD}";
             ;;
         "push")
             if acquire_lock "${_lockFile}"; then
@@ -307,8 +331,9 @@ function check_commit_frequency() {
     return ${rescode};
 }
 
-function git_init() {
+function git_initialize() {
     local _remoteRepos="${1}";
+    local _prjFolder="${2}";
     local rescode=0;
 
     if isDebugEnabled; then
@@ -323,49 +348,37 @@ function git_init() {
 
         if isDebugEnabled; then
             logDebugResult SUCCESS "done";
-            logDebug -n "Initializing git repository";
         fi
-        git --git-dir "${GIT_DIR}" --work-tree . init "${_remoteRepos}" 2>&1 > /dev/null
+        git_init "${_remoteRepos}" "${_prjFolder}";
         rescode=$?;
 
         if [ $rescode -eq 0 ]; then
 
             if isDebugEnabled; then
                 logDebugResult SUCCESS "done";
-                logDebug -n "Adding remote ${_remoteRepos}";
             fi
-            git --git-dir "${GIT_DIR}" --work-tree . remote add origin "${_remoteRepos}" 2>&1 > /dev/null
+            git_add_remote_repos "${_remoteRepos}" "${_prjFolder}";
             rescode=$?;
 
             if [ $rescode -eq 0 ]; then
 
-                if isDebugEnabled; then
-                    logDebugResult SUCCESS "done";
-                    logDebug -n "Pulling origin master";
-                fi
-                git --git-dir "${GIT_DIR}" --work-tree . pull origin master 2>&1 3>&1 > /dev/null
+                git_pull_remote "${_prjFolder}";
                 rescode=$?;
                 if [ $rescode -eq 0 ]; then
 
-                    if isDebugEnabled; then
-                        logDebugResult SUCCESS "done";
-                    else
+                    if ! isDebugEnabled; then
                         logInfoResult SUCCESS "done";
                     fi
                 else
                     purge_stale_lock
-                    if isDebugEnabled; then
-                        logDebugResult FAILURE "failed";
-                    else
+                    if ! isDebugEnabled; then
                         logInfoResult FAILURE "failed";
                     fi
                     exitWithErrorCode CANNOT_SETUP_GIT_REPOSITORY;
                 fi
             else
                 purge_stale_lock
-                if isDebugEnabled; then
-                    logDebugResult FAILURE "failed";
-                else
+                if ! isDebugEnabled; then
                     logInfoResult FAILURE "failed";
                 fi
                 exitWithErrorCode CANNOT_SETUP_GIT_REPOSITORY;
@@ -391,49 +404,182 @@ function git_init() {
         exitWithErrorCode CANNOT_SETUP_GIT_REPOSITORY;
     fi
 
-    git_add_files
+    git_add_files "${_prjFolder}";
+}
+
+function git_init() {
+    local _remoteRepos="${1}";
+    local _prjFolder="${2}";
+    
+    if isDebugEnabled; then
+        logDebug -n "Initializing git repository";
+    fi
+    pushd "${_prjFolder}" > /dev/null;
+    git --git-dir "${GIT_DIR}" --work-tree . init "${_remoteRepos}" 2>&1 > /dev/null
+    rescode=$?;
+
+    if [ $rescode -eq 0 ]; then
+
+        if isDebugEnabled; then
+            logDebugResult SUCCESS "done";
+        fi
+    else
+        if isDebugEnabled; then
+            logDebugResult FAILURE "failed";
+        fi
+    fi
+    popd > /dev/null
+
+    return ${rescode}
+        
+}
+
+function git_add_remote() {
+    local _remoteRepos="${1}";
+    local _prjFolder="${2}";
+    
+    if isDebugEnabled; then
+        logDebug -n "Adding remote ${_remoteRepos}";
+    fi
+    pushd "${_prjFolder}" > /dev/null;
+    git --git-dir "${GIT_DIR}" --work-tree . remote add origin "${_remoteRepos}" 2>&1 > /dev/null
+    rescode=$?;
+
+    if [ $rescode -eq 0 ]; then
+
+        if isDebugEnabled; then
+            logDebugResult SUCCESS "done";
+        fi
+    else
+        logDebugResult FAILURE "failed";
+    fi
+    popd > /dev/null
+
+    return ${rescode};
+}
+
+function git_pull_remote() {
+    local _prjFolder="${1}";
+
+    if isDebugEnabled; then
+        logDebug -n "Pulling ${REMOTE_REPO_NAME} ${REMOTE_BRANCH}";
+    fi
+
+    pushd "${_prjFolder}" > /dev/null;
+    git --git-dir "${GIT_DIR}" --work-tree . pull ${REMOTE_REPO_NAME} ${REMOTE_BRANCH} 2>&1 3>&1 > /dev/null
+    rescode=$?;
+
+    if [ $rescode -eq 0 ]; then
+
+        if isDebugEnabled; then
+            logDebugResult SUCCESS "done";
+        fi
+    else
+        if isDebugEnabled; then
+            logDebugResult FAILURE "failed";
+        fi
+    fi
+    popd > /dev/null
+
+    return ${rescode};
+}
+
+function git_setup_gitignore() {
+    local _prjFolder="${1}";
+
+    if isDebugEnabled; then
+        logDebug -n "Setting up the file patterns to ignore";
+    fi
+
+    mkdir "${GIT_DIR}"/info;
+    for _p in ${GITIGNORE_ENTRIES}; do
+        echo "${_p}" >> "${GIT_DIR}"/info/exclude;
+        rescode=$?;
+        if [ $rescode -ne 0 ]; then
+            break;
+        fi
+    done
+
+    if [ $rescode -eq 0 ]; then
+        if isDebugEnabled; then
+            logDebugResult SUCCESS "done";
+        fi
+    else
+        if isDebugEnabled; then
+            logDebugResult FAILURE "failed";
+        fi
+    fi
+
+    return ${rescode};
 }
 
 function git_add_files() {
+    local _prjFolder="${1}";
     local rescode=0;
 
+    pushd "${_prjFolder}" > /dev/null;
     logInfo -n "Adding files";
 
-#  find . -type f -exec file {} \; 2>&1 | grep -v target | grep text | grep -v -e '~$' | cut -d':' -f 1 | awk -vG="${GIT_DIR}" '{printf("git --git-dir %s --work-tree . add --ignore-errors %s 2>&1 > /dev/null\n", G, $0);}' | sh 2>&1 > /dev/null
-for ext in ${EXTENSIONS}; do
-    local _add="'*.${ext}'";
-    echo git --git-dir "${GIT_DIR}" --work-tree . add --ignore-errors ${_add} 2>&1 > /dev/null | sh
+    find . -type f -exec file {} \; 2>&1 | grep -v target | grep text | grep -v -e '~$' | cut -d':' -f 1 | awk -vG="${GIT_DIR}" '{printf("git --git-dir %s --work-tree . add --ignore-errors %s 2>&1 > /dev/null\n", G, $0);}' | sh 2>&1 > /dev/null
     rescode=$?;
     if [ $rescode -ne 0 ]; then
+        popd > /dev/null
         purge_stale_lock
         logInfoResult FAILURE "failed";
         exitWithErrorCode CANNOT_ADD_FILES;
     fi
-done
-logInfoResult SUCCESS "done";
+    logInfoResult SUCCESS "done";
+    popd > /dev/null
+}
+
+function git_add_files_based_on_extensions() {
+    local _prjFolder="${1}";
+    local rescode=0;
+
+    pushd "${_prjFolder}" > /dev/null;
+    logInfo -n "Adding files";
+
+#  find . -type f -exec file {} \; 2>&1 | grep -v target | grep text | grep -v -e '~$' | cut -d':' -f 1 | awk -vG="${GIT_DIR}" '{printf("git --git-dir %s --work-tree . add --ignore-errors %s 2>&1 > /dev/null\n", G, $0);}' | sh 2>&1 > /dev/null
+    for ext in ${EXTENSIONS}; do
+        local _add="'*.${ext}'";
+        echo git --git-dir "${GIT_DIR}" --work-tree . add --ignore-errors ${_add} 2>&1 > /dev/null | sh
+        rescode=$?;
+        if [ $rescode -ne 0 ]; then
+            popd > /dev/null
+            purge_stale_lock
+            logInfoResult FAILURE "failed";
+            exitWithErrorCode CANNOT_ADD_FILES;
+        fi
+    done
+    logInfoResult SUCCESS "done";
+    popd > /dev/null
 }
 
 function git_commit() {
+    local _prjFolder="${1}";
     local rescode=0;
 
-    git_add_files;
+    git_add_files "${_prjFolder}";
 
     logInfo -n "Commiting changes";
 
+    pushd "${_prjFolder}" > /dev/null;
     git --git-dir "${GIT_DIR}" --work-tree . status | tail -n 1 | grep "nothing" | grep "commit" 2>&1 > /dev/null
     rescode=$?;
     if [ $rescode -eq 0 ]; then
         logInfoResult SUCCESS "done";
+        popd > /dev/null
     else
         git --git-dir "${GIT_DIR}" --work-tree . commit -a -m"$(date '+%Y%m%d%H%M')" 2>&1 > /dev/null
         rescode=$?;
+        popd > /dev/null
         if [ $rescode -eq 0 ]; then
             logInfoResult SUCCESS "done";
         else
             logInfoResult FAILURE "failed";
             exitWithErrorCode CANNOT_COMMIT_CHANGES;
         fi
-    fi  
+    fi
 }
 
 function git_commit_loop() {
